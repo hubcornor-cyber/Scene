@@ -1,0 +1,293 @@
+let projectState = null;
+let isPlaying = false;
+let currentTime = 0;
+let lastFrameTime = null;
+let animationFrameId = null;
+let renderAudioElement = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let renderIntervalId = null;
+
+document.addEventListener("DOMContentLoaded", () => {
+    loadStateFromCache();
+    initPlayerControls();
+    initRenderPipeline();
+    drawPlayerFrame();
+    updateTimelineDisplay();
+});
+
+function showError(text) {
+    const el = document.getElementById("errorAlert");
+    el.textContent = text;
+    el.classList.remove("hidden");
+}
+
+function showSuccess(text) {
+    const el = document.getElementById("successAlert");
+    el.textContent = text;
+    el.classList.remove("hidden");
+}
+
+function loadStateFromCache() {
+    const raw = localStorage.getItem("studio_project_state");
+    if (raw) {
+        try {
+            projectState = JSON.parse(raw);
+            if (projectState.audio && projectState.audio.dataUrl) {
+                renderAudioElement = new Audio(projectState.audio.dataUrl);
+                renderAudioElement.preload = "auto";
+            }
+        } catch (e) {
+            showError("Failed to synchronize storage context parameters.");
+        }
+    }
+
+    if (!projectState || !projectState.scenes || projectState.scenes.length === 0) {
+        showError("⚠️ No compiled scene tracks found. Please return to the Workspace Page first.");
+    }
+}
+
+function initPlayerControls() {
+    document.getElementById("btnPlayPause").addEventListener("click", togglePlayback);
+    document.getElementById("btnRestart").addEventListener("click", resetPlayback);
+    document.getElementById("btnMuteToggle").addEventListener("click", toggleMute);
+
+    document.getElementById("sliderVolume").addEventListener("input", (e) => {
+        if (renderAudioElement) renderAudioElement.volume = Number(e.target.value);
+    });
+
+    document.getElementById("btnFullscreenPlayer").addEventListener("click", () => {
+        document.getElementById("playerCanvas").requestFullscreen().catch(() => {});
+    });
+
+    document.getElementById("sliderProgressBar").addEventListener("input", (e) => {
+        const total = projectState?.audio?.duration || 30;
+        currentTime = (Number(e.target.value) / 100) * total;
+        if (renderAudioElement) renderAudioElement.currentTime = currentTime;
+        updateTimelineDisplay();
+        drawPlayerFrame();
+    });
+}
+
+function togglePlayback() {
+    if (!projectState) return;
+    const btn = document.getElementById("btnPlayPause");
+
+    if (isPlaying) {
+        isPlaying = false;
+        btn.textContent = "▶ Play Project";
+        if (renderAudioElement) renderAudioElement.pause();
+        cancelAnimationFrame(animationFrameId);
+        return;
+    }
+
+    isPlaying = true;
+    btn.textContent = "⏸ Pause Sequence";
+    if (renderAudioElement) {
+        renderAudioElement.currentTime = currentTime;
+        renderAudioElement.play().catch(() => {});
+    }
+    lastFrameTime = performance.now();
+    playbackLoop();
+}
+
+function resetPlayback() {
+    currentTime = 0;
+    if (renderAudioElement) renderAudioElement.currentTime = 0;
+    updateTimelineDisplay();
+    drawPlayerFrame();
+    if (isPlaying) togglePlayback();
+}
+
+function toggleMute() {
+    if (!renderAudioElement) return;
+    renderAudioElement.muted = !renderAudioElement.muted;
+    document.getElementById("btnMuteToggle").textContent = renderAudioElement.muted ? "🔇 Unmute" : "🔊 Mute";
+}
+
+function playbackLoop() {
+    if (!isPlaying) return;
+
+    const now = performance.now();
+    const delta = (now - lastFrameTime) / 1000;
+    lastFrameTime = now;
+
+    if (renderAudioElement) {
+        currentTime = renderAudioElement.currentTime;
+    } else {
+        currentTime += delta;
+    }
+
+    const total = projectState?.audio?.duration || 30;
+    if (currentTime >= total) {
+        currentTime = total;
+        togglePlayback();
+        resetPlayback();
+        return;
+    }
+
+    updateTimelineDisplay();
+    drawPlayerFrame();
+    animationFrameId = requestAnimationFrame(playbackLoop);
+}
+
+function updateTimelineDisplay() {
+    const total = projectState?.audio?.duration || 30;
+    document.getElementById("lblPlaybackTimeDisplay").textContent =
+        `${currentTime.toFixed(2)}s / ${total.toFixed(2)}s`;
+    document.getElementById("sliderProgressBar").value = total > 0 ? (currentTime / total) * 100 : 0;
+}
+
+function drawPlayerFrame(targetTime = currentTime, externalCtx = null) {
+    const canvas = document.getElementById("playerCanvas");
+    const ctx = externalCtx || canvas.getContext("2d");
+    ctx.fillStyle = "#0c0c0f";
+    ctx.fillRect(0, 0, 1920, 1080);
+
+    if (!projectState || !projectState.scenes) return;
+
+    const scene = projectState.scenes.find(s => targetTime >= s.start_time && targetTime <= s.end_time);
+    if (!scene) return;
+
+    const drawImageSynchronous = (url, fit = "none", x = 0, y = 0, w = 1920, h = 1080) => {
+        if (!url) return;
+        const img = new Image();
+        img.onload = () => {
+            if (fit === "cover") {
+                const scale = Math.max(1920 / img.width, 1080 / img.height);
+                const nw = img.width * scale, nh = img.height * scale;
+                ctx.drawImage(img, (1920 - nw) / 2, (1080 - nh) / 2, nw, nh);
+            } else if (fit === "contain") {
+                const scale = Math.min(1920 / img.width, 1080 / img.height);
+                const nw = img.width * scale, nh = img.height * scale;
+                ctx.drawImage(img, (1920 - nw) / 2, (1080 - nh) / 2, nw, nh);
+            } else if (fit === "stretch") {
+                ctx.drawImage(img, 0, 0, 1920, 1080);
+            } else {
+                ctx.drawImage(img, x, y, w, h);
+            }
+        };
+        img.src = url;
+    };
+
+    if (scene.background_data_url) drawImageSynchronous(scene.background_data_url, scene.background_fit);
+    if (scene.png_data_url) drawImageSynchronous(scene.png_data_url, "none", scene.png_x, scene.png_y, 960, 540);
+    if (scene.overlay_data_url) drawImageSynchronous(scene.overlay_data_url, "stretch");
+
+    ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+    let textY = 960;
+    if (scene.text_position === "center") textY = 540;
+    if (scene.text_position === "top") textY = 160;
+    ctx.fillRect(200, textY - 60, 1520, 90);
+
+    ctx.fillStyle = scene.text_color || "#ffffff";
+    ctx.font = "bold 46px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(scene.transcription, 960, textY - 15);
+}
+
+function initRenderPipeline() {
+    document.getElementById("btnStartRenderSequence").addEventListener("click", startOffscreenRecordingPipeline);
+}
+
+function pickSupportedMimeType() {
+    const format = document.getElementById("selFormatPreset").value;
+    const candidates = format === "mp4"
+        ? ["video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/mp4"]
+        : ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+
+    for (const type of candidates) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported(type)) return type;
+    }
+    return "";
+}
+
+function startOffscreenRecordingPipeline() {
+    if (!projectState) return;
+    if (isPlaying) togglePlayback();
+
+    const fps = parseInt(document.getElementById("selFpsPreset").value, 10);
+    const totalDuration = projectState.audio.duration || 30;
+    const canvas = document.getElementById("playerCanvas");
+    recordedChunks = [];
+
+    const stream = canvas.captureStream(fps);
+
+    if (renderAudioElement && projectState.audio.dataUrl) {
+        try {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const sourceNode = audioCtx.createMediaElementSource(renderAudioElement);
+            const destNode = audioCtx.createMediaStreamAudioDestinationNode();
+            sourceNode.connect(destNode);
+            sourceNode.connect(audioCtx.destination);
+            const audioTrack = destNode.stream.getAudioTracks()[0];
+            if (audioTrack) stream.addTrack(audioTrack);
+        } catch (e) {
+            console.warn("Audio mixing graph bypassed.");
+        }
+    }
+
+    const mimeType = pickSupportedMimeType();
+    const options = mimeType ? { mimeType } : undefined;
+
+    try {
+        mediaRecorder = new MediaRecorder(stream, options);
+    } catch (e) {
+        mediaRecorder = new MediaRecorder(stream);
+    }
+
+    mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+    };
+    mediaRecorder.onstop = compileRecordingOutputBlob;
+
+    document.getElementById("renderProgressBlock").classList.remove("hidden");
+    document.getElementById("btnStartRenderSequence").classList.add("hidden");
+    document.getElementById("deliveryZone").classList.add("hidden");
+
+    let renderCurrentTime = 0;
+    const timeStep = 1 / fps;
+
+    mediaRecorder.start();
+
+    if (renderAudioElement) {
+        renderAudioElement.currentTime = 0;
+        renderAudioElement.play().catch(() => {});
+    }
+
+    clearInterval(renderIntervalId);
+    renderIntervalId = setInterval(() => {
+        renderCurrentTime += timeStep;
+        const percent = Math.min((renderCurrentTime / totalDuration) * 100, 100);
+
+        document.getElementById("renderProgressFill").style.width = `${percent}%`;
+        document.getElementById("lblRenderPercent").textContent = `${Math.floor(percent)}%`;
+        document.getElementById("lblRenderStatusText").textContent =
+            `Baking frame layers sequentially: [${renderCurrentTime.toFixed(1)}s / ${totalDuration.toFixed(1)}s]`;
+
+        drawPlayerFrame(renderCurrentTime);
+
+        if (renderCurrentTime >= totalDuration) {
+            clearInterval(renderIntervalId);
+            mediaRecorder.stop();
+            if (renderAudioElement) renderAudioElement.pause();
+        }
+    }, timeStep * 1000);
+}
+
+function compileRecordingOutputBlob() {
+    const typeValue = document.getElementById("selFormatPreset").value;
+    const mimeType = pickSupportedMimeType() || (typeValue === "mp4" ? "video/mp4" : "video/webm");
+    const blob = new Blob(recordedChunks, { type: mimeType });
+    const url = URL.createObjectURL(blob);
+
+    const dl = document.getElementById("lnkDownloadOutputVideo");
+    dl.href = url;
+    dl.download = `compiled_production.${typeValue}`;
+
+    document.getElementById("renderProgressBlock").classList.add("hidden");
+    document.getElementById("btnStartRenderSequence").classList.remove("hidden");
+    document.getElementById("deliveryZone").classList.remove("hidden");
+    showSuccess("Video output delivered successfully below.");
+}

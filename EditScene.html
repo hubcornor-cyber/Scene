@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Scene</title>
+    <link rel="stylesheet" href="./Style.css">
+    <link rel="stylesheet" href="./Script.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="logo">🎬 <span>AI Studio Editor</span></div>
+        <div class="header-actions">
+            <a href="./Result.html" class="btn btn-secondary">Go to Result</a>
+        </div>
+    </header>
+
+    <main class="workspace-container vertical-split">
+        <section class="wizard-panel" id="panelStep1">
+            <div class="panel-header">
+                <h2>Step 1: Paste or Upload Transcription</h2>
+                <p>Paste one scene per line, then parse it into editable scenes.</p>
+            </div>
+
+            <textarea id="txtTranscription" placeholder="Paste transcription here..."></textarea>
+            <div class="flex-wrap-row gap">
+                <button id="btnParseTranscription" class="btn btn-primary">Parse Transcription</button>
+                <input type="file" id="fileTranscription" accept=".txt,.md,.csv" hidden>
+                <label class="btn btn-secondary" for="fileTranscription">Upload Text File</label>
+            </div>
+
+            <div id="errorAlert" class="alert alert-danger hidden"></div>
+            <div id="successAlert" class="alert alert-success hidden"></div>
+        </section>
+
+        <section class="wizard-panel hidden" id="panelStep2">
+            <div class="panel-header">
+                <h2>Step 2: Audio and Timing</h2>
+                <p>Upload audio to auto-calculate durations.</p>
+            </div>
+
+            <input type="file" id="fileAudio" accept="audio/*">
+            <div id="audioMetadataStatus" class="metadata-badge hidden"></div>
+
+            <div class="margin-top">
+                <button id="btnProcessAudio" class="btn btn-accent" disabled>Process Audio</button>
+            </div>
+        </section>
+
+        <section class="wizard-panel hidden" id="panelStep3">
+            <div class="panel-header">
+                <h2>Step 3: Scene Editor</h2>
+                <p>Edit one scene at a time.</p>
+            </div>
+
+            <div class="grid-split">
+                <aside class="wizard-sidebar">
+                    <div class="scene-selector-header">
+                        <span>Scenes</span>
+                        <span id="sceneWizardProgress">0 / 0</span>
+                    </div>
+                    <div id="sceneMiniList" class="scene-mini-list"></div>
+                </aside>
+
+                <div class="wizard-focused-card">
+                    <div class="focused-scene-title">
+                        <span class="badge" id="lblFocusedSceneId">Scene</span>
+                        <div class="focused-text-display" id="lblFocusedText"></div>
+                    </div>
+
+                    <textarea id="inputVisualDesc" placeholder="Visual description..."></textarea>
+
+                    <div class="focused-form-grid">
+                        <div class="form-group">
+                            <label>Background File</label>
+                            <input type="file" id="inputBgFile" accept="image/*">
+                            <div class="asset-preview-box" id="previewBgBox">No Background Asset Linked</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>PNG Overlay File</label>
+                            <input type="file" id="inputPngFile" accept="image/*">
+                            <div class="asset-preview-box" id="previewPngBox">No Overlay Linked</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Foreground Overlay</label>
+                            <input type="file" id="inputOverlayFile" accept="image/*">
+                            <div class="asset-preview-box" id="previewOverlayBox">No Foreground Object Linked</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label><input type="checkbox" id="chkApplyToAll"> Apply to all remaining</label>
+                        </div>
+                    </div>
+
+                    <div class="asset-utility-bar">
+                        <button id="btnClearSceneAssets" class="btn btn-danger-outline">Clear Assets</button>
+                        <div class="flex-wrap-row gap">
+                            <button id="btnPrevWizardScene" class="btn btn-secondary">Previous</button>
+                            <button id="btnNextWizardScene" class="btn btn-primary">Next</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="wizard-panel hidden" id="panelStep4">
+            <div class="panel-header">
+                <h2>Step 4: Timeline and Inspector</h2>
+                <p>Review scene blocks and fine-tune timing.</p>
+            </div>
+
+            <div class="canvas-container">
+                <canvas id="studioCanvas" width="1920" height="1080"></canvas>
+            </div>
+
+            <div class="canvas-controls-strip">
+                <button id="btnTimelinePlay" class="btn-circle">▶</button>
+                <button id="btnTimelineFullscreen" class="btn-circle-secondary">⛶</button>
+                <span id="txtTimelineTime">0.00s / 0.00s</span>
+            </div>
+
+            <div class="timeline-component-box">
+                <div id="timelineRuler" class="timeline-ruler"></div>
+                <div class="timeline-tracks-area">
+                    <div id="timelinePlayhead" class="timeline-playhead"></div>
+                    <div id="sceneBlocksTrack" class="scene-blocks-track"></div>
+                </div>
+            </div>
+
+            <div class="scene-inspector-panel margin-top">
+                <div id="inspectorEmptyState" class="empty-msg">Select a scene block to edit it.</div>
+                <div id="inspectorContent" class="hidden">
+                    <input type="hidden" id="inspSceneIndex">
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>Start Time</label>
+                            <input type="number" id="inspStart" step="0.01">
+                        </div>
+                        <div class="form-group">
+                            <label>End Time</label>
+                            <input type="number" id="inspEnd" step="0.01">
+                        </div>
+                    </div>
+
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>Background Fit</label>
+                            <select id="inspBgFit">
+                                <option value="cover">Cover</option>
+                                <option value="contain">Contain</option>
+                                <option value="stretch">Stretch</option>
+                                <option value="none">None</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Transition</label>
+                            <select id="inspTransition">
+                                <option value="cut">Cut</option>
+                                <option value="fade">Fade</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>Text Position</label>
+                            <select id="inspTextPos">
+                                <option value="top">Top</option>
+                                <option value="center">Center</option>
+                                <option value="bottom">Bottom</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Text Color</label>
+                            <input type="text" id="inspTextColor" value="#ffffff">
+                        </div>
+                    </div>
+
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>PNG X</label>
+                            <input type="number" id="inspPngX" step="1">
+                        </div>
+                        <div class="form-group">
+                            <label>PNG Y</label>
+                            <input type="number" id="inspPngY" step="1">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="margin-top flex-wrap-row gap">
+                <button id="btnRecalculateTiming" class="btn btn-secondary">Recalculate Timing</button>
+                <button id="btnExportJSON" class="btn btn-secondary">Export JSON</button>
+                <input type="file" id="fileImportJSON" accept=".json" hidden>
+                <label class="btn btn-secondary" for="fileImportJSON">Import JSON</label>
+                <button id="btnBuildCSV" class="btn btn-secondary">Build CSV</button>
+                <button id="btnDownloadCSV" class="btn btn-secondary" disabled>Download CSV</button>
+                <button id="btnCopyCSV" class="btn btn-secondary" disabled>Copy CSV</button>
+                <input type="file" id="fileImportCSV" accept=".csv" hidden>
+                <label class="btn btn-secondary" for="fileImportCSV">Import CSV</label>
+            </div>
+
+            <div class="margin-top flex-wrap-row gap">
+                <button id="btnSaveProject" class="btn btn-accent">Save Project</button>
+                <button id="btnNewProject" class="btn btn-danger">New Project</button>
+            </div>
+
+            <div class="data-hub-panel margin-top">
+                <div class="flex-wrap-row space-between">
+                    <span>Scenes: <strong id="telScenesCount">0</strong></span>
+                    <span>Audio: <strong id="telAudioStatus">Missing Track</strong></span>
+                    <span>Duration: <strong id="telDuration">0.00s</strong></span>
+                    <span id="telMissingAssets">0 Scenes Missing Images</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="./EditScene.js" defer></script>
+</body>
+</html>
