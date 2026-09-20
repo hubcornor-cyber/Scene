@@ -203,11 +203,11 @@ function parseTextPhase() {
 
     window.projectState.transcription = rawText;
 
-    const lines = rawText
-        .split(/
-+/)
-        .map(l => l.replace(/^(🔢|🕒|▶|🤖)s*/g, "").trim())
-        .filter(l => l.length > 0);
+  const lines = rawText
+    .split(/\r?\n+/)
+    .map(l => l.replace(/^(🔢|🕒|▶|🤖)\s*/g, "").trim())
+    .filter(l => l.length > 0);
+    
 
     window.projectState.scenes = lines.map((line, idx) => ({
         scene_id: `scene_${idx + 1}`,
@@ -686,8 +686,8 @@ function compileStateToCSV() {
         csvLines.push(row.join(","));
     });
 
-    currentGeneratedCSV = csvLines.join("
-");
+    currentGeneratedCSV = csvLines.join("\n");
+    
     document.getElementById("btnDownloadCSV")?.removeAttribute("disabled");
     document.getElementById("btnCopyCSV")?.removeAttribute("disabled");
     displayAlert("CSV data matrix structure created successfully.", false);
@@ -718,9 +718,8 @@ function importSequenceFromCSVFile(e) {
     const r = new FileReader();
     r.onload = (ev) => {
         const raw = ev.target.result;
-        const rows = raw.split("
-").map(row => row.trim()).filter(row => row.length > 0);
-
+const rows = raw.split(/\r?\n/).map(row => row.trim()).filter(row => row.length > 0);
+        
         if (rows.length < 2) {
             displayAlert("Invalid CSV structural configuration target.");
             return;
